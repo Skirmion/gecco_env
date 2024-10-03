@@ -1,0 +1,104 @@
+Bootstrap: docker
+From: ubuntu:20.04
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    export TZ=Etc/UTC
+    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+    apt-get update && apt-get install -y \
+        wget \
+        gpg-agent \
+        software-properties-common \
+        python3 \
+        python3-pip \
+        vim \
+        git \
+        autoconf \
+        locales
+
+    # Добавляем репозиторий Intel oneAPI
+    wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+    | gpg --dearmor | tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+    echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
+    | tee /etc/apt/sources.list.d/oneAPI.list
+
+    apt-get update && apt-get install -y \
+        intel-oneapi-compiler-dpcpp-cpp-and-cpp-classic-2021.4.0 \
+        intel-oneapi-compiler-fortran-2021.4.0 \
+        intel-oneapi-mkl-2021.4.0 \
+        intel-oneapi-mkl-devel-2021.4.0
+
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+    
+    # Обновляем пути к компиляторам и MKL в .bashrc
+    echo "source /opt/intel/oneapi/setvars.sh" >> /etc/bash.bashrc
+
+    # Создаем скрипт для проверки установки
+    cat << EOF > /usr/local/bin/check_installation.sh
+#!/bin/bash
+set -e
+
+echo "Проверка установки Intel C++ Compiler (ICC) 2021:"
+if command -v icc &> /dev/null; then
+    icc --version
+else
+    echo "ICC не найден в PATH. Проверяем наличие файла:"
+    ls -l /opt/intel/oneapi/compiler/2021.4.0/linux/bin/intel64/icc || echo "Файл icc не найден"
+fi
+
+echo -e "\nПроверка установки Intel oneAPI DPC++/C++ Compiler (ICX) 2021:"
+if command -v icx &> /dev/null; then
+    icx --version
+else
+    echo "ICX не найден в PATH. Проверяем наличие файла:"
+    ls -l /opt/intel/oneapi/compiler/2021.4.0/linux/bin/intel64/icx || echo "Файл icx не найден"
+fi
+
+echo -e "\nПроверка установки Intel Fortran Compiler (IFort) 2021:"
+if command -v ifort &> /dev/null; then
+    ifort --version
+else
+    echo "IFort не найден в PATH. Проверяем наличие файла:"
+    ls -l /opt/intel/oneapi/compiler/2021.4.0/linux/bin/intel64/ifort || echo "Файл ifort не найден"
+fi
+
+echo -e "\nПроверка установки Intel MKL 2021:"
+if [ -d "\$MKLROOT" ]; then
+    echo "Intel MKL 2021 установлен в \$MKLROOT"
+    ls -l \$MKLROOT/lib/intel64
+else
+    echo "Директория Intel MKL 2021 не найдена"
+fi
+
+echo -e "\nПроверка наличия библиотек MKL 2021:"
+for lib in mkl_intel_ilp64 mkl_intel_lp64 mkl_gnu_thread mkl_core mkl_sequential; do
+    if [ -f "\$MKLROOT/lib/intel64/lib\$lib.so" ]; then
+        echo "\$lib найден."
+    else
+        echo "\$lib не найден."
+    fi
+done
+
+echo -e "\nТекущий PATH:"
+echo \$PATH
+
+echo -e "\nПроверка переменных окружения Intel oneAPI 2021:"
+env | grep INTEL || echo "Переменные окружения Intel не найдены"
+EOF
+
+    chmod +x /usr/local/bin/check_installation.sh
+
+%environment
+    export GECCO_BIN=~/GeCCo-public/bin/x86_64-linux-gnu-ifort/gecco.x
+    export PATH=~/GeCCo-public/bin/x86_64-linux-gnu-ifort:$PATH
+    export GECCO_DIR=~/GeCCo-public
+    export LC_ALL=C
+    export LANG=C
+
+%runscript
+    echo "Контейнер инициализирован с Intel C++ Compiler 2021, Intel oneAPI DPC++/C++ Compiler 2021, Intel Fortran Compiler 2021, Intel MKL 2021, Python 3, git, autoconf, и vim"
+    echo "Выполняем проверку установки..."
+    /usr/local/bin/check_installation.sh
+    echo -e "\nДля входа в интерактивный режим, используйте: apptainer shell my_container.sif"
+    /bin/bash
